@@ -10,9 +10,11 @@
 #include <boost/numeric/ublas/vector.hpp>
 #include <boost/numeric/ublas/matrix.hpp>
 #include <boost/numeric/ublas/io.hpp>
+#include <boost/array.hpp>
+#include <boost/multi_array.hpp>
 #include <boost/random/mersenne_twister.hpp>
-#include <boost/threadpool.hpp>
 #include <boost/thread/thread.hpp>
+#include <boost/thread/future.hpp>
 #include <boost/thread/mutex.hpp>
 #include <boost/ref.hpp>
 
@@ -25,22 +27,25 @@ namespace random
 double double_range(double start, double end);
 }
 
-struct position
+class point3
 {
-    friend std::ostream& operator<< (std::ostream& os, const som::position& p)
+    friend std::ostream& operator<< (std::ostream& os, const som::point3& p)
     {
-        os << "(" << p.x << "," << p.y << ")";
+        os << "(" << p.x << "," << p.y << "," << p.z << ")";
         return os;
     }
-
+public:
+    point3() : x(0), y(0), z(0) {}
+    point3(unsigned x, unsigned y, unsigned z) : x(x), y(y), z(z) {}
     unsigned x;
     unsigned y;
+    unsigned z;
 };
 
 struct abstract_distance
 {
     virtual double
-    operator() (const ublas::vector<double>& v1, const ublas::vector<double>& v2) =0;
+    operator() (const ublas::vector<double>&, const ublas::vector<double>&) =0;
 };
 
 struct euclidean_distance : abstract_distance
@@ -51,9 +56,18 @@ struct euclidean_distance : abstract_distance
     }
 };
 
-struct euclidean_distance1
+/*! \brief Wrapper around the euclidean norm from boost::numeric::ublas
+
+    Takes two weight vectors and computes the euclidean distance between them.
+
+    \param v1 The first vector
+    \param v2 The second vector
+    \returns The euclidean distance between the two vectors
+  */
+template <class T>
+struct norm_2
 {
-    double operator() (const ublas::vector<double>& v1, const ublas::vector<double>& v2)
+    double operator() (const ublas::vector<T>& v1, const ublas::vector<T>& v2)
     {
         return ublas::norm_2(v1-v2);
     }
@@ -69,27 +83,32 @@ public:
 
 private:
     ublas::vector<double> weights_;
-    boost::shared_ptr<abstract_distance> distance_;
 };
 
 typedef boost::shared_ptr<node> node_ptr;
-typedef boost::function <double (const ublas::vector<double>& v1,
-                                 const ublas::vector<double>& v2)> distance_function;
+typedef boost::function <double (const ublas::vector<double>& v1, const ublas::vector<double>& v2)> distance_function;
+
+typedef std::vector<std::vector<som::node_ptr> > grid2;
 
 class map
 {
     friend std::ostream& operator<< (std::ostream&, const som::map&);
 
 public:
+    /* constructor */
     map(unsigned map_size, unsigned sample_size, const boost::shared_ptr<som::abstract_distance>& distance);
-    unsigned get_size() { return map_size_; } //!< Returns the map size.
+
+    /* getters and setters */
+    unsigned size() const { return map_size_; } //!< Returns the map size.
     const distance_function& get_distance() const { return distance_function_; }
-    const boost::threadpool::pool& threadpool() const { return tp_; }
-    som::node_ptr operator() (unsigned i, unsigned j);
-    som::position get_bmu(ublas::vector<double>& sample);
-    som::position get_bmu1(ublas::vector<double>& sample);
-    som::position get_bmu2(ublas::vector<double>& sample);
-    som::position get_bmu3(ublas::vector<double>& sample);
+    /*! \brief Convenience operator for accessing the map's nodes
+
+        \returns The som::node_ptr at position (i,j,k)
+    */
+    som::node_ptr operator()(unsigned i, unsigned j, unsigned k) const { return grid3_[i][j][k]; }
+
+    /* application logic */
+    som::point3 best_mathing_unit(ublas::vector<double>& sample);
     void train();
     void load_samples(const std::vector<ublas::vector<double> >&);
 
@@ -97,19 +116,17 @@ private:
     unsigned map_size_; //!< Size of the self-organizing map
     unsigned sample_size_; //!< Size of the sample vectors
     unsigned n_samples_; //!< Number of input samples
-    std::vector<ublas::vector<double> > input_samples_; //!< The input samples
-    ublas::matrix<som::node_ptr> nodes_; //!< The node (som::node_ptr) matrix.
-    boost::shared_ptr<som::abstract_distance> distance_; //!< The distance functor
-    distance_function distance_function_; //!< Distance function (boost::function)
-    /* threadpool and workers */
-    boost::threadpool::pool tp_;
-    boost::mutex mutex_;
+
+    boost::array<ublas::vector<double>, 0> input_samples_; //!< The input samples
+    boost::multi_array<som::node_ptr, 3> grid3_; //!< 3d grid of nodes
+    boost::shared_ptr<som::abstract_distance> distance_; //!< The distance functor (DEPRECATED - I think)
+    som::distance_function distance_function_; //!< Distance function (boost::function)
 };
 
 struct thread_result
 {
     double min_distance;
-    som::position position;
+    som::point3 position;
 };
 
 } // namespace som

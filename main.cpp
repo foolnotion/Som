@@ -38,7 +38,7 @@ public:
 
     void display_map(som::map& map)
     {
-        unsigned map_size = map.get_size();
+        unsigned map_size = map.size();
         unsigned dx = width_ / map_size;
         unsigned dy = height_ / map_size;
 
@@ -46,9 +46,12 @@ public:
         {
             for (unsigned j = 0; j < map_size; ++j)
             {
-                boost::numeric::ublas::vector<double> weights = map(i,j)->get_weights();
-                sf::Shape r = sf::Shape::Rectangle(i*dx, j*dy, i*dx+dx, j*dy+dy, sf::Color(weights[0]*255, weights[1]*255, weights[2]*255));
-                window_ptr->Draw(r);
+                for (unsigned k = 0; j < map_size; ++j)
+                {
+                    boost::numeric::ublas::vector<double> weights = map(i,j,k)->get_weights();
+                    sf::Shape r = sf::Shape::Rectangle(i*dx, j*dy, i*dx+dx, j*dy+dy, sf::Color(weights[0]*255, weights[1]*255, weights[2]*255));
+                    window_ptr->Draw(r);
+                }
             }
         }
     }
@@ -62,31 +65,18 @@ int main (void)
 {
     boost::timer timer;
 
-    unsigned map_size = 3000;
+    unsigned map_size = 200;
     unsigned sample_size = 3; // rgb colors (3 components)
 
-    som::map map(map_size, sample_size, boost::make_shared<som::euclidean_distance>());
-    som::position p;
-    std::cout << "Best matching unit for " << map(2,2)->get_weights() << std::endl;
+    boost::shared_ptr<som::abstract_distance> distance = boost::make_shared<som::euclidean_distance>();
+
+    som::map map(map_size, sample_size, distance);
+    som::point3 p;
+    std::cout << "Best matching unit for " << map(2,2,2)->get_weights() << std::endl;
     timer.restart();
-    p = map.get_bmu(map(2,2)->get_weights());
+    p = map.best_mathing_unit(map(2,2,2)->get_weights());
     std::cout << "position: " << p << std::endl;
     std::cout << "t1: " << timer.elapsed() << std::endl;
-
-    timer.restart();
-    p = map.get_bmu1(map(2,2)->get_weights());
-    std::cout << "position: " << p << std::endl;
-    std::cout << "t2: " << timer.elapsed() << std::endl;
-
-    timer.restart();
-    p = map.get_bmu2(map(2,2)->get_weights());
-    std::cout << "position: " << p << std::endl;
-    std::cout << "t3: " << timer.elapsed() << std::endl;
-
-    timer.restart();
-    p = map.get_bmu3(map(2,2)->get_weights());
-    std::cout << "position: " << p << std::endl;
-    std::cout << "t4: " << timer.elapsed() << std::endl;
 
 //    som_window window(600, 600, "som");
 //    window.main_loop(map);

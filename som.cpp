@@ -4,6 +4,7 @@
 #include <boost/random/variate_generator.hpp>
 #include <boost/detail/iterator.hpp>
 
+
 /* Using a global generator (we don't want to create a new one at every call */
 boost::mt19937 twister;
 
@@ -18,12 +19,16 @@ som::operator<< (std::ostream& os, const som::node &n)
 
 std::ostream&
 som::operator<< (std::ostream& os, const som::map& map)
-{
-    for (unsigned i = 0; i != map.nodes_.size1(); ++i)
+{    
+    const unsigned map_size = map.size();
+    for (unsigned i = 0; i != map_size; ++i)
     {
-        for (unsigned j = 0; j != map.nodes_.size2(); ++j)
+        for (unsigned j = 0; j != map_size; ++j)
         {
-            os << *map.nodes_(i,j);
+            for (unsigned k = 0; j != map_size; ++j)
+            {
+                os << *map(i,j,k);
+            }
         }
         os << std::endl;
     }
@@ -61,15 +66,20 @@ som::map::map(unsigned map_size, unsigned sample_size, const boost::shared_ptr<s
       sample_size_(sample_size),
       distance_(distance)
 {
-    tp_.size_controller ().resize (boost::thread::hardware_concurrency ());
-    distance_function_ = som::euclidean_distance1();
-    nodes_ = ublas::matrix<som::node_ptr>(map_size_, map_size_);
+    typedef boost::multi_array<som::node_ptr, 3>::index index;
 
-    for (unsigned i = 0; i != map_size_; ++i)
+    distance_function_ = som::norm_2<double>(); // TODO: initialize this properly
+
+    grid3_.resize(boost::extents[map_size_][map_size_][map_size_]);
+
+    for (index i = 0; i != map_size_; ++i)
     {
-        for (unsigned j = 0; j != map_size_; ++j)
+        for (index j = 0; j != map_size_; ++j)
         {
-            nodes_(i,j) = (boost::make_shared<som::node>(sample_size_));
+            for (index k = 0; k != map_size; ++k)
+            {
+                grid3_[i][j][k] = boost::make_shared<som::node>(sample_size_);
+            }
         }
     }
 }
@@ -77,20 +87,9 @@ som::map::map(unsigned map_size, unsigned sample_size, const boost::shared_ptr<s
 void
 som::map::load_samples(const std::vector<ublas::vector<double> >& samples)
 {
-    input_samples_ = samples;
+
+//    input_samples_ = samples;
     std::cout << "Loaded " << input_samples_.size() << " input samples." << std::endl;
-}
-
-/*! \brief Convenience operator for accessing the map's nodes
-
-    \param i The line of the nodes matrix
-    \param j The column of the nodes matrix
-    \returns The som::node_ptr at position (i,j)
-*/
-som::node_ptr
-som::map::operator() (unsigned i, unsigned j)
-{
-    return nodes_(i,j);
 }
 
 /*! \brief Get best matching unit
@@ -102,154 +101,28 @@ som::map::operator() (unsigned i, unsigned j)
     \returns A som::position representing the matrix indexes of the closest node
     \sa abstract_distance, euclidean_distance
   */
-som::position
-som::map::get_bmu(ublas::vector<double> &sample)
+som::point3
+som::map::best_mathing_unit(ublas::vector<double>& sample)
 {
-    som::position p; // use this trick to avoid assignment of smart pointers (expensive copy)
+    typedef boost::multi_array<som::node_ptr, 3>::index index;
+    som::point3 p;
     double min_distance = 2.0;
-    for (unsigned i = 0; i != map_size_; ++i)
+    for (index i = 0; i != map_size_; ++i)
     {
-        for (unsigned j = 0; j != map_size_; ++j)
+        for (index j = 0; j != map_size_; ++j)
         {
-            double distance = (*distance_)(nodes_(i,j)->get_weights(), sample);
-            if (min_distance > distance)
+            for (index k = 0; k != map_size_; ++k)
             {
-                min_distance = distance;
-                p.x = i;
-                p.y = j;
+                double distance = distance_function_(grid3_[i][j][k]->get_weights(), sample);
+                if (min_distance > distance)
+                {
+                    min_distance = distance;
+                    p.x = i;
+                    p.y = j;
+                    p.z = k;
+                }
             }
         }
     }
     return p;
 }
-
-som::position
-som::map::get_bmu1(ublas::vector<double> &sample)
-{
-    som::position p; // use this trick to avoid assignment of smart pointers (expensive copy)
-    double min_distance = 2.0;
-    for (unsigned i = 0; i != map_size_; ++i)
-    {
-        for (unsigned j = 0; j != map_size_; ++j)
-        {
-            double distance = distance_function_(nodes_(i,j)->get_weights(), sample);
-            if (min_distance > distance)
-            {
-                min_distance = distance;
-                p.x = i;
-                p.y = j;
-            }
-        }
-    }
-    return p;
-}
-
-som::thread_result
-calculate_distance(som::map& map, ublas::vector<double>& sample, unsigned offset, unsigned length)
-{
-    som::distance_function distance_function = map.get_distance();
-    som::thread_result r;
-    r.min_distance = 2.0;
-    for (unsigned i = offset; i != offset+length; ++i)
-    {
-        for (unsigned j = 0; j != map.get_size(); ++j)
-        {
-            double distance = distance_function(map(i,j)->get_weights(), sample);
-            if (r.min_distance > distance)
-            {
-                r.min_distance = distance;
-                r.position.x = i;
-                r.position.y = j;
-            }
-        }
-    }
-    std::cout << r.position << std::endl;
-    return r;
-}
-
-som::position
-som::map::get_bmu2(ublas::vector<double>& sample)
-{
-    boost::array<boost::unique_future<som::thread_result>, 2> futures;
-    unsigned length = ceil(map_size_ / 4.0);
-    for (unsigned i = 0; i != 4; ++i)
-    {
-        unsigned offset = length * i;
-        std::cout << "offset: " << offset << std::endl;
-        if (offset + length > map_size_)
-        {
-            length = map_size_ - offset;
-            std::cout << "length: " << length << std::endl;
-        }
-        boost::packaged_task<som::thread_result> pt(boost::bind(&calculate_distance, boost::ref(*this), boost::ref(sample), offset, length));
-        futures.at(i) = pt.get_future();
-        boost::thread t(boost::move(pt));
-    }
-    double min_distance = 2.0; // the euclidean norm between v1=(1,1,1) and v2=(1,1,1) is ||v1,v2||=1.732 < 2.0
-    som::position p;
-    for (boost::array<boost::unique_future<som::thread_result>, 2>::size_type i = 0; i != futures.size(); ++i)
-    {
-        futures.at(i).wait();
-        double d = futures.at(i).get().min_distance;
-        if (min_distance > d)
-        {
-            min_distance = d;
-            p = futures.at(i).get().position;
-        }
-    }
-    return p;
-}
-
-void
-calculate_distance1(som::map& map, ublas::vector<double>& sample, unsigned offset, unsigned length, som::thread_result& r)
-{
-    som::distance_function distance_function = map.get_distance();
-    r.min_distance = 2.0;
-    for (unsigned i = offset; i != offset+length; ++i)
-    {
-        for (unsigned j = 0; j < map.get_size(); ++j)
-        {
-            double distance = distance_function(map(i,j)->get_weights(), sample);
-            if (r.min_distance > distance)
-            {
-                r.min_distance = distance;
-                r.position.x = i;
-                r.position.y = j;
-            }
-        }
-    }
-    std::cout << r.position << std::endl;
-}
-
-som::position
-som::map::get_bmu3(ublas::vector<double>& sample)
-{
-    boost::thread_group tg;
-    std::vector<som::thread_result> results(2);
-    unsigned length = ceil(map_size_ / 2.0);
-    for (unsigned i = 0; i != 2; ++i)
-    {
-        unsigned offset = length * i;
-        if (offset + length > map_size_)
-        {
-            length = map_size_ - offset;
-        }
-        tg.create_thread(boost::bind(&calculate_distance1, boost::ref(*this), boost::ref(sample), offset, length, boost::ref(results[i])));
-    }
-    tg.join_all();
-    double min_distance = 2.0; // the euclidean norm between v1=(1,1,1) and v2=(1,1,1) is ||v1,v2||=1.732
-    som::position p;
-    for (std::vector<som::thread_result>::size_type i = 0; i != results.size(); ++i)
-    {
-        double d = results[i].min_distance;
-        if (min_distance > d)
-        {
-            min_distance = d;
-            p = results[i].position;
-        }
-    }
-    return p;
-}
-
-
-
