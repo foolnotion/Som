@@ -4,6 +4,8 @@
 
 #include "som.hpp"
 
+#include <boost/timer.hpp>
+
 class som_window
 {
 public:
@@ -58,15 +60,33 @@ private:
 
 int main (void)
 {
-    unsigned map_size = 4;
+    boost::timer timer;
+
+    unsigned map_size = 3000;
     unsigned sample_size = 3; // rgb colors (3 components)
 
     som::map map(map_size, sample_size, boost::make_shared<som::euclidean_distance>());
-    std::cout << map;
-
+    som::position p;
     std::cout << "Best matching unit for " << map(2,2)->get_weights() << std::endl;
-    som::position p = map.get_bmu(map(2,2)->get_weights());
-    std::cout << map(p.x,p.y)->get_weights() << std::endl;
+    timer.restart();
+    p = map.get_bmu(map(2,2)->get_weights());
+    std::cout << "position: " << p << std::endl;
+    std::cout << "t1: " << timer.elapsed() << std::endl;
+
+    timer.restart();
+    p = map.get_bmu1(map(2,2)->get_weights());
+    std::cout << "position: " << p << std::endl;
+    std::cout << "t2: " << timer.elapsed() << std::endl;
+
+    timer.restart();
+    p = map.get_bmu2(map(2,2)->get_weights());
+    std::cout << "position: " << p << std::endl;
+    std::cout << "t3: " << timer.elapsed() << std::endl;
+
+    timer.restart();
+    p = map.get_bmu3(map(2,2)->get_weights());
+    std::cout << "position: " << p << std::endl;
+    std::cout << "t4: " << timer.elapsed() << std::endl;
 
 //    som_window window(600, 600, "som");
 //    window.main_loop(map);
