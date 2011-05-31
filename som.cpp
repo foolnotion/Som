@@ -93,7 +93,7 @@ som::map::map(unsigned map_size, unsigned sample_size, const som::metric& metric
     \sa abstract_distance, euclidean_distance
   */
 som::point3
-som::map::best_mathing_unit(ublas::vector<double>& sample)
+som::map::best_matching_unit(ublas::vector<double>& sample)
 {
     typedef boost::multi_array<som::node_ptr, 3>::index index;
     som::point3 p;

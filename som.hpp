@@ -4,6 +4,7 @@
 #include <ostream>
 #include <vector>
 
+#define NDEBUG
 #define BOOST_DISABLE_ASSERTS // production mode
 #include <boost/shared_ptr.hpp>
 #include <boost/make_shared.hpp>
@@ -95,7 +96,7 @@ public:
     som::node_ptr operator()(unsigned i, unsigned j, unsigned k) const { return grid3_[i][j][k]; }
 
     /* application logic */
-    som::point3 best_mathing_unit(ublas::vector<double>& sample);
+    som::point3 best_matching_unit(ublas::vector<double>& sample);
     void train();
     void load_samples(const std::vector<ublas::vector<double> >&);
 
