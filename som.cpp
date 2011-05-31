@@ -8,7 +8,6 @@
 /* Using a global generator (we don't want to create a new one at every call */
 boost::mt19937 twister;
 
-/* Global threadpool (too lazy to pass around a global context, and singletons are evil!) */
 std::ostream&
 som::operator<< (std::ostream& os, const som::node &n)
 {

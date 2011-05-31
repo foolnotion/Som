@@ -4,6 +4,7 @@
 #include <ostream>
 #include <vector>
 
+#define BOOST_DISABLE_ASSERTS // production mode
 #include <boost/shared_ptr.hpp>
 #include <boost/make_shared.hpp>
 #include <boost/function.hpp>
@@ -96,7 +97,7 @@ class map
 
 public:
     /* constructor */
-    map(unsigned map_size, unsigned sample_size, const boost::shared_ptr<som::abstract_distance>& distance);
+    explicit map(unsigned map_size, unsigned sample_size, const boost::shared_ptr<som::abstract_distance>& distance);
 
     /* getters and setters */
     unsigned size() const { return map_size_; } //!< Returns the map size.
