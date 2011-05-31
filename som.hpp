@@ -146,6 +146,7 @@ public:
         \tparam S Size of the sample vector
      */
     map<N,S>()
+        : epoch_(0)
     {
         grid3_.resize(boost::extents[N][N][N]);
 
@@ -160,6 +161,8 @@ public:
                         grid3_[x][y][z](i) = som::random::double_range(0.f,1.f);
                     }
                 }
+
+        std::cout << "Time: " << epoch_ << std::endl;
     }
 
     /*! \brief Get best matching unit
@@ -168,8 +171,7 @@ public:
         depending on what metric the map uses).
 
         By default the euclidean distance is used:
-        \f[ d(p,q)=\sqrt{(p_1-q_1)^2+(p_2-q_2)^2+...+(p_i-q_i)^2+...+(p_n-q_n)^2}
-        \f]
+        \f[ d(p,q)=\sqrt{(p_1-q_1)^2+(p_2-q_2)^2+...+(p_i-q_i)^2+...+(p_n-q_n)^2} \f]
 
         \param sample The sample vector
         \returns A som::point3 representing the coordinates of the closest node
@@ -195,7 +197,16 @@ public:
         return p;
     }
 
-    /*! \brief Load input samples from a som::util::sample to the map's internal sample vector
+    /*! \brief Modify the best matching unit and its neighbours according to the current sample
+
+        \param bmu The best matching unit
+      */
+    void
+    scale_neighbours(const som::point3& bmu)
+    {
+    }
+
+    /*! \brief Load input samples from a som::util::samples object to the map's internal (and slightly different) sample vector
 
         This function basically transforms each \c std::vector (corresponding to an input sample read from file) into an \c ublas::bounded_vector. The dimensions must match.
 
@@ -219,9 +230,14 @@ public:
     */
     const ublas::bounded_vector<double,S>& operator()(unsigned i, unsigned j, unsigned k) const { return grid3_[i][j][k]; }
     std::vector<ublas::bounded_vector<double,S> > samples_; //!< The input samples
+
 private:
     boost::multi_array<ublas::bounded_vector<double,S>, 3> grid3_; //!< 3d grid of nodes
 //    boost::function<double (ublas::vector_expression<double>& e)> norm_;
+
+    /* internal state - the following variables control the learning process */
+    unsigned epoch_;
+    unsigned radius_;
 };
 
 } // namespace som
