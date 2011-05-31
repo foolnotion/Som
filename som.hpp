@@ -43,20 +43,6 @@ public:
     unsigned z;
 };
 
-struct abstract_distance
-{
-    virtual double
-    operator() (const ublas::vector<double>&, const ublas::vector<double>&) =0;
-};
-
-struct euclidean_distance : abstract_distance
-{
-    double operator() (const ublas::vector<double>& v1, const ublas::vector<double>& v2)
-    {
-        return ublas::norm_2(v1-v2);
-    }
-};
-
 /*! \brief Wrapper around the euclidean norm from boost::numeric::ublas
 
     Takes two weight vectors and computes the euclidean distance between them.
@@ -87,7 +73,7 @@ private:
 };
 
 typedef boost::shared_ptr<node> node_ptr;
-typedef boost::function <double (const ublas::vector<double>& v1, const ublas::vector<double>& v2)> distance_function;
+typedef boost::function <double (const ublas::vector<double>& v1, const ublas::vector<double>& v2)> metric;
 
 typedef std::vector<std::vector<som::node_ptr> > grid2;
 
@@ -97,11 +83,11 @@ class map
 
 public:
     /* constructor */
-    explicit map(unsigned map_size, unsigned sample_size, const boost::shared_ptr<som::abstract_distance>& distance);
+    explicit map(unsigned map_size, unsigned sample_size, const som::metric& metric);
 
     /* getters and setters */
     unsigned size() const { return map_size_; } //!< Returns the map size.
-    const distance_function& get_distance() const { return distance_function_; }
+    const som::metric& get_distance() const { return metric_; }
     /*! \brief Convenience operator for accessing the map's nodes
 
         \returns The som::node_ptr at position (i,j,k)
@@ -120,8 +106,7 @@ private:
 
     boost::array<ublas::vector<double>, 0> input_samples_; //!< The input samples
     boost::multi_array<som::node_ptr, 3> grid3_; //!< 3d grid of nodes
-    boost::shared_ptr<som::abstract_distance> distance_; //!< The distance functor (DEPRECATED - I think)
-    som::distance_function distance_function_; //!< Distance function (boost::function)
+    som::metric metric_; //!< Distance function (boost::function)
 };
 
 struct thread_result

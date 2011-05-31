@@ -9,9 +9,7 @@ int main (void)
     unsigned map_size = 200;
     unsigned sample_size = 3; // rgb colors (3 components)
 
-    boost::shared_ptr<som::abstract_distance> distance = boost::make_shared<som::euclidean_distance>();
-
-    som::map map(map_size, sample_size, distance);
+    som::map map(map_size, sample_size, som::norm_2<double>());
     som::point3 p;
     std::cout << "Best matching unit for " << map(2,2,2)->get_weights() << std::endl;
     timer.restart();

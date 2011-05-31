@@ -60,14 +60,14 @@ som::node::node(const unsigned sample_size)
     \param distance A reference to the distance functor used to determine the best mathing unit and its neighbours
     \sa abstract_distance, euclidean_distance
  */
-som::map::map(unsigned map_size, unsigned sample_size, const boost::shared_ptr<som::abstract_distance>& distance)
+som::map::map(unsigned map_size, unsigned sample_size, const som::metric& metric)
     : map_size_(map_size),
       sample_size_(sample_size),
-      distance_(distance)
+      metric_(metric)
 {
     typedef boost::multi_array<som::node_ptr, 3>::index index;
 
-    distance_function_ = som::norm_2<double>(); // TODO: initialize this properly
+    metric_ = som::norm_2<double>(); // TODO: initialize this properly
 
     grid3_.resize(boost::extents[map_size_][map_size_][map_size_]);
 
@@ -81,14 +81,6 @@ som::map::map(unsigned map_size, unsigned sample_size, const boost::shared_ptr<s
             }
         }
     }
-}
-
-void
-som::map::load_samples(const std::vector<ublas::vector<double> >& samples)
-{
-
-//    input_samples_ = samples;
-    std::cout << "Loaded " << input_samples_.size() << " input samples." << std::endl;
 }
 
 /*! \brief Get best matching unit
@@ -112,7 +104,7 @@ som::map::best_mathing_unit(ublas::vector<double>& sample)
         {
             for (index k = 0; k != map_size_; ++k)
             {
-                double distance = distance_function_(grid3_[i][j][k]->get_weights(), sample);
+                double distance = metric_(grid3_[i][j][k]->get_weights(), sample);
                 if (min_distance > distance)
                 {
                     min_distance = distance;
