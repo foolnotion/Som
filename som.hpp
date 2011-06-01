@@ -7,43 +7,45 @@
 #include <sstream>
 #include <string>
 #include <stdexcept>
-
-#define NDEBUG
-#define BOOST_DISABLE_ASSERTS
-
 #include <boost/function.hpp>
 #include <boost/numeric/ublas/vector.hpp>
-#include <boost/numeric/ublas/matrix.hpp>
 #include <boost/numeric/ublas/io.hpp>
 #include <boost/array.hpp>
 #include <boost/multi_array.hpp>
 #include <boost/random/mersenne_twister.hpp>
 #include <boost/random/uniform_real.hpp>
-#include <boost/random/variate_generator.hpp>
+#include <boost/random/uniform_int.hpp>
 
-using namespace boost::numeric; // for convenience: boost::numeric::ublas:: becomes ublas::
+using namespace boost::numeric;
 
 /* Using a global generator (we don't want to create a new one at every call */
-namespace // anonymous namespace - no one shall get their filthy hands on the twister!
+namespace { boost::mt19937 twister; } // anonymous namespace - no one shall get their filthy hands on the twister!
+
+namespace som {
+/** \brief Random numbers uniformly distributed on the given interval.
+
+    Underlying generator: Mersenne Twister (\c boost::mt19937)
+ */
+namespace random {
+/** \brief Returns a double value \f$v\in[begin,end]\f$ (note the \e closed interval). */
+double
+double_range(double begin, double end)
 {
-boost::mt19937 twister;
+    boost::uniform_real<> dist(begin, end);
+    return dist(twister);
 }
 
-namespace som
+/** \brief Returns an integer value \f$v\in[begin,end]\f$ (again, \e closed interval). */
+int
+int_range(int begin, int end)
 {
-namespace random
-{
-double double_range(double start, double end)
-{
-    boost::uniform_real<> dist(start, end);
+    boost::uniform_int<> dist(begin, end);
     return dist(twister);
 }
 } // namespace random
 
-namespace util
-{
-namespace
-{
+/** \brief Helper functions (read from file, etc) */
+namespace util { namespace {
 /*! \brief Split a space-separated string into tokens.
 
     Streams in C++ have the special ability of reading until a whitespace. The stringstream
@@ -51,7 +53,8 @@ namespace
     whitespace is met; buf is then used to push_back() into the vector.
     The vector tokens will contain all the words in str.
 
-    @param str The string to be split */
+    \param str The string to split
+ */
 std::vector<std::string>
 split_by_spaces(std::string& str)
 {
@@ -99,6 +102,7 @@ load_samples_from_file(const char* filename)
 }
 } // namespace util
 
+/** \brief 3d point data type */
 class point3
 {
     friend std::ostream& operator<< (std::ostream& os, const som::point3& p)
@@ -109,12 +113,16 @@ class point3
 public:
     point3() : x(0), y(0), z(0) {}
     point3(unsigned x, unsigned y, unsigned z) : x(x), y(y), z(z) {}
-    unsigned x;
-    unsigned y;
-    unsigned z;
+    unsigned x; //! X coordinate
+    unsigned y; //! Y coordinate
+    unsigned z; //! Z coordinate
 };
 
-template <std::size_t N, std::size_t S>
+/** \brief The self-organizing map
+
+    Holds its internal state and can train itself.
+*/
+template < std::size_t N, std::size_t S >
 class map
 {
     friend std::ostream& operator<< (std::ostream& os, const som::map<N,S>& map)
@@ -136,7 +144,7 @@ class map
     typedef typename boost::multi_array<ublas::bounded_vector<double,S>, 3>::index index;
 
 public:
-    /*! \brief Map constructor
+    /** \brief Map constructor
 
         For now the map uses the euclidean distance (boost::numeric::ublas::norm_2)
 
@@ -218,7 +226,7 @@ public:
     {
         samples_.resize(samples.size());
         for (typename std::vector<ublas::bounded_vector<double,S> >::size_type i = 0; i != samples_.size(); ++i)
-            for (unsigned j = 0; j != samples[i].size(); ++j)
+            for (typename ublas::bounded_vector<double,S>::size_type j = 0; j != samples[i].size(); ++j)
             {
                 samples_[i](j) = samples[i][j];
             }
@@ -228,7 +236,9 @@ public:
 
         \returns The element at position \f$(i,j,k)\f$
     */
-    const ublas::bounded_vector<double,S>& operator()(unsigned i, unsigned j, unsigned k) const { return grid3_[i][j][k]; }
+    const ublas::bounded_vector<double,S>&
+    operator()(unsigned i, unsigned j, unsigned k) const { return grid3_[i][j][k]; }
+
     std::vector<ublas::bounded_vector<double,S> > samples_; //!< The input samples
 
 private:
