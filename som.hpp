@@ -1,6 +1,11 @@
 #ifndef SOM_HPP
 #define SOM_HPP
 
+/* work around some libpng errors */
+#define png_infopp_NULL (png_infopp)NULL
+#define int_p_NULL (int*)NULL
+
+/* standard stuff */
 #include <vector>
 #include <ostream>
 #include <fstream>
@@ -8,14 +13,23 @@
 #include <string>
 #include <stdexcept>
 #include <cmath>
-#include <boost/function.hpp>
+
+/* vector operations */
 #include <boost/numeric/ublas/vector.hpp>
 #include <boost/numeric/ublas/io.hpp>
+
+/* array and multi_array storage types */
 #include <boost/array.hpp>
 #include <boost/multi_array.hpp>
+
+/* random numbers */
 #include <boost/random/mersenne_twister.hpp>
 #include <boost/random/uniform_real.hpp>
 #include <boost/random/uniform_int.hpp>
+
+/* misc: save images, show progress */
+#include <boost/progress.hpp>
+#include <boost/gil/extension/io/png_io.hpp>
 
 using namespace boost::numeric;
 
@@ -177,7 +191,7 @@ class map
         return os;
     }
 
-    typedef typename boost::multi_array<ublas::c_vector<double,S>, 3>::index index;
+    typedef typename boost::multi_array<ublas::c_vector<double,S>, S>::index index;
 
 private:
     boost::multi_array<ublas::c_vector<double,S>, 3> grid3_; //!< 3d grid of nodes
@@ -230,10 +244,26 @@ public:
         The reasons this function exists are explained here:
         http://google-styleguide.googlecode.com/svn/trunk/cppguide.xml#Doing_Work_in_Constructors
       */
-    template <int>
-    void init ();
+    void init()
+    {
+        radius_decay_factor_ = std::exp(-std::log(initial_learn_radius_ * 2)/(radius_gone_factor_ * total_steps_));
+        learn_rate_decay_factor_ = std::exp(-std::log(initial_learn_rate_/final_learn_rate_)/total_steps_);
 
+        grid3_.resize(boost::extents[N][N][N]);
 
+        std::cout << "Map dimensions: " << N << "x" << N << "x" << N << " (" << N*N*N << " elements)" << std::endl;
+
+        for (index x = 0; x != N; ++x)
+            for (index y = 0; y != N; ++y)
+                for (index z = 0; z != N; ++z)
+                {
+                    for (int i = 0; i != S; ++i)
+                    {
+                        grid3_[x][y][z](i) = som::random::double_range(0.f,1.f);
+                    }
+                }
+        is_initialized_ = true;
+    }
 
     /*! \brief Accessor for the map's elements
 
@@ -277,9 +307,9 @@ public:
         return p;
     }
 
-    /*! \brief Load input samples from a som::util::samples object to the map's internal (and slightly different) sample vector
+    /** \brief Load input samples from a som::util::samples object to the map's internal (and slightly different) sample vector
 
-        This function basically transforms each \c std::vector (corresponding to an input sample read from file) into an \c ublas::c_vector. The dimensions must match.
+        This function basically transforms each \c std::vector (corresponding to an input sample read from file) into an \c ublas::c_vector (vector dimensions must match). The values in the original vector are normalized to be in \f$[0,1]\f$ by dividing the vector (element-wise) with it's magnitude: \f[ \hat{v}=\frac{v}{||v||}\f] so that internally the map will always operate with unit vectors.
 
         \todo Work out a way to make sure the dimensions will match.
 
@@ -289,30 +319,59 @@ public:
     {
         samples_.resize(samples.size());
         for (typename std::vector<ublas::c_vector<double,S> >::size_type i = 0; i != samples_.size(); ++i)
+        {
             for (typename ublas::c_vector<double,S>::size_type j = 0; j != samples[i].size(); ++j)
             {
                 samples_[i](j) = samples[i][j];
             }
+            samples_[i] /= ublas::norm_2(samples_[i]);
+            std::cout << "\t" << samples_[i] << std::endl;
+        }
     }
 
+    /** \brief Converts the weights of the map elements into raw image data
+
+        Uses boost::gil to create a png file
+
+        \param filename Filename to be written to disk
+      */
+    void
+    save_image(const std::string& filename)
+    {
+        int dim = round(sqrt(pow(N,S)));
+        unsigned char r[dim*dim];
+        unsigned char g[dim*dim];
+        unsigned char b[dim*dim];
+        int x = 0;
+        for (int i = 0; i != N; ++i)
+            for (int j = 0; j != N; ++j)
+                for (int k = 0; k != N; ++k)
+                {
+                    ublas::c_vector<double,S> v = grid3_[i][j][k] * 255;
+                    r[x] = v[0];
+                    g[x] = v[1];
+                    b[x] = v[2];
+                    ++x;
+                }
+        boost::gil::rgb8c_planar_view_t view = boost::gil::planar_rgb_view(dim, dim, r, g, b, dim);
+        boost::gil::png_write_view(filename, view);
+    }
 
     void
     learn()
     {
+        boost::progress_display pt(total_steps_);
         for (step_ = 0; step_ != total_steps_; ++step_)
         {
-            double error = 0.0;
             learn_radius_ = round(initial_learn_radius_ * pow(radius_decay_factor_, step_));
             learn_rate_ = initial_learn_rate_ * pow(learn_rate_decay_factor_, step_);
 
             for (unsigned i = 0; i != samples_.size(); ++i)
             {
                 som::vector3<int> bmu = best_matching_unit(samples_[i]);
-                scale_neighbours(bmu);
-                error += ublas::norm_2(grid3_[bmu.x][bmu.y][bmu.z]-samples_[i]);
+                scale_neighbours(bmu, samples_[i]);
             }
-            error /= samples_.size();
-            std::cout << "Error at step " << step_ << ": " << error << std::endl;
+            ++pt;
         }
     }
 
@@ -321,59 +380,35 @@ private:
 
         \param bmu The best matching unit
       */
-    void
-    scale_neighbours(const som::vector3<int>& bmu)
+    inline void
+    scale_neighbours(const som::vector3<int>& bmu, const ublas::c_vector<double,S>& sample)
     {
-        int x_min = (bmu.x > learn_radius_) ? (bmu.x - learn_radius_) : 0;
-        int y_min = (bmu.y > learn_radius_) ? (bmu.y - learn_radius_) : 0;
-        int z_min = (bmu.z > learn_radius_) ? (bmu.z - learn_radius_) : 0;
-        int x_max = ( (bmu.x + learn_radius_) < N) ? (bmu.x + learn_radius_) : N;
-        int y_max = ( (bmu.y + learn_radius_) < N) ? (bmu.y + learn_radius_) : N;
-        int z_max = ( (bmu.z + learn_radius_) < N) ? (bmu.z + learn_radius_) : N;
+        int xmin = (bmu.x > learn_radius_) ? (bmu.x - learn_radius_) : 0;
+        int ymin = (bmu.y > learn_radius_) ? (bmu.y - learn_radius_) : 0;
+        int zmin = (bmu.z > learn_radius_) ? (bmu.z - learn_radius_) : 0;
+        int xmax = ( (bmu.x + learn_radius_) < N) ? (bmu.x + learn_radius_) : N;
+        int ymax = ( (bmu.y + learn_radius_) < N) ? (bmu.y + learn_radius_) : N;
+        int zmax = ( (bmu.z + learn_radius_) < N) ? (bmu.z + learn_radius_) : N;
 
         double radius2 = learn_radius_ * learn_radius_;
         /* double sigma = learn_radius_ / 3.0 therefore sigma2 = radius2 / 9.0 */
         double sigma2 = radius2 / 9.0;
 
-        for (int i = x_min; i != x_max; ++i)
-            for (int j = y_min; j != y_max; ++j)
-                for (int k = z_min; k != z_max; ++k)
+        for (int i = xmin; i != xmax; ++i)
+            for (int j = ymin; j != ymax; ++j)
+                for (int k = zmin; k != zmax; ++k)
                 {
-                    int x = (i-bmu.x);
-                    int y = (i-bmu.y);
-                    int z = (i-bmu.z);
+                    int x = (i-bmu.x), y = (j-bmu.y), z = (k-bmu.z);
                     double dist2 = x*x + y*y + z*z;
+
                     if (dist2 < radius2)
                     {
-                        double radius_func = learn_rate_ * exp(-radius2 / (2*sigma2));
-                        grid3_[i][j][k] += (samples_[step_]-grid3_[i][j][k]) * radius_func;
+                        double radius_func = learn_rate_ * exp(-dist2 / (2*sigma2));
+                        grid3_[i][j][k] += (sample-grid3_[i][j][k]) * radius_func;
                     }
                 }
     }
 };
-
-template <>
-template <>
-void map<3,3>::init<3>()
-{
-    radius_decay_factor_ = std::exp(-std::log(initial_learn_radius_ * 2)/(radius_gone_factor_ * total_steps_));
-    learn_rate_decay_factor_ = std::exp(-std::log(initial_learn_rate_/final_learn_rate_)/total_steps_);
-
-    grid3_.resize(boost::extents[N][N][N]);
-
-    std::cout << "Map dimensions: " << N << "x" << N << "x" << N << " (" << N*N*N << " elements)" << std::endl;
-
-    for (index x = 0; x != N; ++x)
-        for (index y = 0; y != N; ++y)
-            for (index z = 0; z != N; ++z)
-            {
-                for (int i = 0; i != S; ++i)
-                {
-                    grid3_[x][y][z](i) = som::random::double_range(0.f,1.f);
-                }
-            }
-    is_initialized_ = true;
-}
 
 } // namespace som
 
