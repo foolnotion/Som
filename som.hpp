@@ -112,7 +112,6 @@ load_samples_from_file(const char* filename)
             samples.push_back(v);
         }
     }
-    std::cout << "Number of samples: " << samples.size() << std::endl;
     return samples;
 }
 } // namespace util
@@ -165,7 +164,6 @@ class map
     friend std::ostream& operator<< (std::ostream& os, const som::map<N,3>& map)
     {
         for (int i = 0; i != N; ++i)
-        {
             for (int j = 0; j != N; ++j)
             {
                 for (int k = 0; j != N; ++j)
@@ -174,20 +172,6 @@ class map
                 }
             }
             os << std::endl;
-        }
-        return os;
-    }
-
-    friend std::ostream& operator<< (std::ostream& os, const som::map<N,2>& map)
-    {
-        for (int i = 0; i != N; ++i)
-        {
-            for (int j = 0; j != N; ++j)
-            {
-                os << map(i,j);
-            }
-            os << std::endl;
-        }
         return os;
     }
 
@@ -195,10 +179,7 @@ class map
 
 private:
     boost::multi_array<ublas::c_vector<double,S>, 3> grid3_; //!< 3d grid of nodes
-    boost::multi_array<ublas::c_vector<double,S>, 2> grid2_; //!< 3d grid of nodes
     std::vector<ublas::c_vector<double,S> > samples_; //!< The input samples
-
-//    boost::function<double (ublas::vector_expression<double>& e)> norm_;
 
     /* internal state - the following variables control the learning process */
     int step_;
@@ -226,7 +207,8 @@ public:
         \tparam N Size (number of elements) for one dimension
         \tparam S Size of the sample vector
      */
-    map<N,S>(int total_steps, double init_radius, double radius_gone_factor, double init_learn_rate, double final_learn_rate)
+    map<N,S>(int total_steps, double init_radius, double radius_gone_factor,
+             double init_learn_rate, double final_learn_rate)
         : step_(0),
           total_steps_(total_steps),
           initial_learn_radius_(init_radius),
@@ -290,7 +272,7 @@ public:
     best_matching_unit(const ublas::c_vector<double,S>& sample)
     {
         som::vector3<int> p;
-        double min_distance = 2.0;
+        double min_distance = 2.0; // trick: the euclidean norm for a unit vector will never be greater than sqrt(3)
         for (index x = 0; x != N; ++x)
             for (index y = 0; y != N; ++y)
                 for (index z = 0; z != N; ++z)
@@ -324,7 +306,7 @@ public:
             {
                 samples_[i](j) = samples[i][j];
             }
-            samples_[i] /= ublas::norm_2(samples_[i]);
+            samples_[i] /= ublas::norm_2(samples_[i]); // normalization
             std::cout << "\t" << samples_[i] << std::endl;
         }
     }
@@ -338,7 +320,8 @@ public:
     void
     save_image(const std::string& filename)
     {
-        int dim = round(sqrt(pow(N,S)));
+        std::cout << "N: " << N << ", S: " << S << std::endl;
+        const int dim = round(sqrt(pow(N,S)));
         unsigned char r[dim*dim];
         unsigned char g[dim*dim];
         unsigned char b[dim*dim];
@@ -347,7 +330,9 @@ public:
             for (int j = 0; j != N; ++j)
                 for (int k = 0; k != N; ++k)
                 {
-                    ublas::c_vector<double,S> v = grid3_[i][j][k] * 255;
+                    assert (i < N && j < N && k < N);
+//                    std::cout <<i<<" "<<j<<" "<<k<<std::endl;
+                    const ublas::c_vector<double,S> v = grid3_[i][j][k] * 255;
                     r[x] = v[0];
                     g[x] = v[1];
                     b[x] = v[2];
@@ -408,7 +393,7 @@ private:
                     }
                 }
     }
-};
+}; // end of map class definition
 
 } // namespace som
 

@@ -4,7 +4,7 @@ HEADERS += \
 SOURCES += \
     main.cpp
 
+LIBS += -lpng
 
-LIBS += -lboost_thread -lsfml-graphics -lsfml-window -lsfml-system -lpng
-
-QMAKE_CXXFLAGS = "-O3 -march=native -DNDEBUG -DBOOST_DISABLE_ASSERTS"
+#QMAKE_CXXFLAGS = "-O3 -march=native -DNDEBUG -DBOOST_DISABLE_ASSERTS"
+QMAKE_CXXFLAGS = "-g -march=native"
