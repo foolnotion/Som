@@ -164,6 +164,7 @@ class map
     friend std::ostream& operator<< (std::ostream& os, const som::map<N,3>& map)
     {
         for (int i = 0; i != N; ++i)
+        {
             for (int j = 0; j != N; ++j)
             {
                 for (int k = 0; j != N; ++j)
@@ -172,10 +173,11 @@ class map
                 }
             }
             os << std::endl;
+        }
         return os;
     }
 
-    typedef typename boost::multi_array<ublas::c_vector<double,S>, S>::index index;
+    typedef typename boost::multi_array<ublas::c_vector<double,S>, 3>::index index;
 
 private:
     boost::multi_array<ublas::c_vector<double,S>, 3> grid3_; //!< 3d grid of nodes
@@ -259,8 +261,7 @@ public:
 
     /*! \brief Get best matching unit
 
-        Returns the position (in 3d coordinates) of the closest vector (in terms of distance to the sample vector,
-        depending on what metric the map uses).
+        Returns the position (in 3d coordinates) of the closest vector (in terms of distance to the sample vector, depending on what metric the map uses).
 
         By default the euclidean distance is used:
         \f[ d(p,q)=\sqrt{(p_1-q_1)^2+(p_2-q_2)^2+...+(p_i-q_i)^2+...+(p_n-q_n)^2} \f]
@@ -269,7 +270,7 @@ public:
         \returns A som::point3 representing the coordinates of the closest node
      */
     som::vector3<int>
-    best_matching_unit(const ublas::c_vector<double,S>& sample)
+    best_matching_unit(const ublas::c_vector<double,S>& sample) const
     {
         som::vector3<int> p;
         double min_distance = 2.0; // trick: the euclidean norm for a unit vector will never be greater than sqrt(3)
@@ -299,6 +300,12 @@ public:
      */
     void load_samples(const som::util::samples& samples)
     {
+        if (!is_initialized_)
+        {
+            std::cerr << "Error: map not initialized. Initializing..";
+            init();
+        }
+
         samples_.resize(samples.size());
         for (typename std::vector<ublas::c_vector<double,S> >::size_type i = 0; i != samples_.size(); ++i)
         {
@@ -311,33 +318,35 @@ public:
         }
     }
 
-    /** \brief Converts the weights of the map elements into raw image data
+    /** \brief Attempts to map 3d (rgb) or 4d (rgba) points (when the sample vectors are of length 3 or 4) to a 2d plane
 
-        Uses boost::gil to create a png file
+        Uses boost::gil to create a png file, however, loosing one or 2 dimensions makes the image look weird. But it's an
+        interesting pattern nevertheless and it can show that the map really learned something.
 
         \param filename Filename to be written to disk
       */
     void
-    save_image(const std::string& filename)
+    save_image(const std::string& filename) const
     {
-        std::cout << "N: " << N << ", S: " << S << std::endl;
-        const int dim = round(sqrt(pow(N,S)));
-        unsigned char r[dim*dim];
-        unsigned char g[dim*dim];
-        unsigned char b[dim*dim];
-        int x = 0;
-        for (int i = 0; i != N; ++i)
-            for (int j = 0; j != N; ++j)
-                for (int k = 0; k != N; ++k)
+        const int dim = ceil(sqrt(pow(N,3)));
+        const int dim2 = dim * dim;
+        boost::uint8_t r[dim2];
+        boost::uint8_t g[dim2];
+        boost::uint8_t b[dim2];
+        boost::uint8_t a[dim2];
+        boost::uint64_t x = 0;
+        for (index i = 0; i != N; ++i)
+            for (index j = 0; j != N; ++j)
+                for (index k = 0; k != N; ++k)
                 {
-                    assert (i < N && j < N && k < N);
-//                    std::cout <<i<<" "<<j<<" "<<k<<std::endl;
-                    const ublas::c_vector<double,S> v = grid3_[i][j][k] * 255;
+                    ublas::c_vector<double,S> v = grid3_[i][j][k] * 255;
                     r[x] = v[0];
                     g[x] = v[1];
                     b[x] = v[2];
+                    a[x] = v[3];
                     ++x;
                 }
+//        boost::gil::rgba8c_planar_view_t view = boost::gil::planar_rgba_view(dim, dim, r, g, b, a, dim);
         boost::gil::rgb8c_planar_view_t view = boost::gil::planar_rgb_view(dim, dim, r, g, b, dim);
         boost::gil::png_write_view(filename, view);
     }
@@ -345,6 +354,11 @@ public:
     void
     learn()
     {
+        if (!is_initialized_)
+        {
+            std::cerr << "Error: map not initialized. Initializing..";
+            init();
+        }
         boost::progress_display pt(total_steps_);
         for (step_ = 0; step_ != total_steps_; ++step_)
         {
