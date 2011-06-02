@@ -1168,7 +1168,7 @@ USE_MATHJAX            = YES
 # MathJax, but it is strongly recommended to install a local copy of MathJax 
 # before deployment.
 
-MATHJAX_RELPATH        = ../mathjax
+MATHJAX_RELPATH        = http://cdn.mathjax.org/mathjax/latest 
 
 # When the SEARCHENGINE tag is enabled doxygen will generate a search box 
 # for the HTML output. The underlying search engine uses javascript 

@@ -5,6 +5,6 @@ SOURCES += \
     main.cpp
 
 
-LIBS += -lboost_thread
+LIBS += -lboost_thread -lsfml-graphics -lsfml-window -lsfml-system
 
 QMAKE_CXXFLAGS = "-O3 -march=native -DNDEBUG -DBOOST_DISABLE_ASSERTS"
