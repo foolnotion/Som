@@ -91,6 +91,10 @@ split_by_spaces(std::string& str)
 
 typedef std::vector<std::vector<double> > samples;
 
+/** \brief Reads sample vectors line by line from a given filename
+
+    \todo Maybe replace split_by_spaces with \c boost::tokenizer something
+*/
 std::vector<std::vector<double> >
 load_samples_from_file(const char* filename)
 {
@@ -120,9 +124,9 @@ load_samples_from_file(const char* filename)
 
 /** \brief Attempts to map 3d (rgb) or 4d (rgba) points (when the sample vectors are of length 3 or 4) to a 2d plane
 
-    Uses boost::gil to create a png file, however, loosing one or 2 dimensions makes the image look weird. But it's an
-    interesting pattern nevertheless and it can show that the map really learned something.
+    Uses \c boost::gil to create a png file. Even though loosing one or 2 dimensions makes the image look weird, an interesting pattern develops which can show that the map becomes organized.
 
+    \param map The self-organizing map
     \param filename Filename to be written to disk
   */
 template <int N, int S>
@@ -175,12 +179,11 @@ public:
 
 /** \brief The self-organizing map
 
-    Holds its internal state and can self-organize by scaling its units to become
-    more similar to the input samples (also called activity vectors).
+    It learns (self-organizes) by scaling its units to become more similar to the input samples (also called activity vectors).
 
-    At each step k of the learning algorithm, the map learns an activity vector \f${AV}_k\f$ as follows:
-        -# The best matching unit (BMU) is found, so that \f$d(BMU,{AV}_k)\f$ is minimal (where \f$d\f$ is the distance used)
-        -# The BMU and its neighbours are changed to be more similar to \f${AV}_k\f$.\n\n
+    At each step \f$k\f$ of the learning algorithm, the map learns an activity vector \f${AV}_k\f$ as follows:
+        -# The best matching unit (\f$BMU\f$) is found, so that \f$d(BMU,{AV}_k)\f$ is minimal (where \f$d\f$ is the distance used)
+        -# The \f$BMU\f$ and its neighbours are changed to be more similar to \f${AV}_k\f$.\n\n
            The learning rate and the neighbourhood radius are given by two monotonically-decreasing functions:\n\n
            \f[ \eqalignno
                { L(k) &= L_0 \cdot \exp \left( { {-k} \cdot \frac{\ln \frac{L_0}{L_M} }{M} } \right)\ -\ \text{
@@ -196,7 +199,13 @@ learning rate at step }\bf k & (1) \cr
                 - \f$\lfloor x \rceil\f$ denotes the nearest integer function of real number \f$x\f$.
                 .
 \n
-           Two constant variables can be extracted from the above relations, to ease the computation (hint: the logarithm parts).
+           Two constants can be extracted from the above relations, to ease the computation (hint: the logarithm parts).\n\n
+           The learning rate for model vectors within the \f$BMU\f$ neighbourhood (given by (2)) is scaled by a factor corresponding to a 3d Gaussian envelope with a standard deviation of \f$R(k)/3\f$:
+           \f[ \eqalignno
+                { {MV}_k[x,y,z] &= {MV}_{k-1}[z,y,z]+({AV}_k-{MV}_{k-1}[z,y,z]) \cdot L(k) \cdot
+                  e^{ - \frac{1}{2} \cdot \left( \frac{\| BMU-{MV}_k \|}{R(k)/3} \right)^2 } & (3) }
+           \f]
+           Where \f$ \|BMU-{MV}_k\| = \sqrt {(x_{BMU}-x)^2+(y_{BMU}-y)^2+(z_{BMU}-z)^2} \f$ is the euclidean distance between the best matching unit and the current model vector within the neighbourhood.
   */
 template < int N, int S >
 class map
@@ -242,7 +251,7 @@ private:
 public:
     /** \brief Map constructor
 
-        For now the map uses the euclidean distance (boost::numeric::ublas::norm_2)
+        For now the map uses the euclidean distance (\c boost::numeric::ublas::norm_2)
 
         \todo Enable usage of custom metrics
 
@@ -291,43 +300,12 @@ public:
 
     /*! \brief Accessor for the map's elements
 
-        \returns The element at position \f$(i,j,k)\f$
+        \returns The model vector at position \f$(i,j,k)\f$ within the 3d lattice
     */
     const ublas::c_vector<double,S>&
     element(int i, int j, int k) const
     {
         return grid3_[i][j][k];
-    }
-
-    /*! \brief Get best matching unit
-
-        Returns the position (in 3d coordinates) of the closest vector (in terms of distance to the sample vector, depending on what metric the map uses).
-
-        By default the euclidean distance is used:
-        \f[ d(p,q)=\sqrt{(p_1-q_1)^2+(p_2-q_2)^2+...+(p_i-q_i)^2+...+(p_n-q_n)^2} \f]
-
-        \param sample The sample vector
-        \returns A som::point3 representing the coordinates of the closest node
-     */
-    som::vector3<int>
-    best_matching_unit(const ublas::c_vector<double,S>& sample) const
-    {
-        som::vector3<int> p;
-        double min_distance = 2.0; // trick: the euclidean norm for a unit vector will never be greater than sqrt(3)
-        for (index x = 0; x != N; ++x)
-            for (index y = 0; y != N; ++y)
-                for (index z = 0; z != N; ++z)
-                {
-                    double distance = ublas::norm_2(grid3_[x][y][z]-sample);
-                    if (min_distance > distance)
-                    {
-                        min_distance = distance;
-                        p.x = x;
-                        p.y = y;
-                        p.z = z;
-                    }
-                }
-        return p;
     }
 
     /** \brief Load input samples from a som::util::samples object to the map's internal (and slightly different) sample vector
@@ -358,6 +336,12 @@ public:
         }
     }
 
+    /** \brief Enter the learning loop
+
+        Runs for a total number of epochs
+        - at each epoch (discrete time step) the map scales the weight vectors of the \f$BMU\f$ and it's neighbours
+
+      */
     void
     learn()
     {
@@ -413,6 +397,37 @@ private:
                         grid3_[i][j][k] += (sample-grid3_[i][j][k]) * radius_func;
                     }
                 }
+    }
+
+    /*! \brief Get best matching unit
+
+        Returns the position (in 3d coordinates) of the closest vector (in terms of distance to the sample vector, depending on what metric the map uses).
+
+        By default the euclidean distance is used:
+        \f[ d(p,q)=\sqrt{(p_1-q_1)^2+(p_2-q_2)^2+...+(p_i-q_i)^2+...+(p_n-q_n)^2} \f]
+
+        \param sample The sample vector
+        \returns A som::point3 representing the coordinates of the closest node
+     */
+    inline som::vector3<int>
+    best_matching_unit(const ublas::c_vector<double,S>& sample) const
+    {
+        som::vector3<int> p;
+        double min_distance = 2.0; // trick: the euclidean norm for a unit vector will never be greater than sqrt(3)
+        for (index x = 0; x != N; ++x)
+            for (index y = 0; y != N; ++y)
+                for (index z = 0; z != N; ++z)
+                {
+                    double distance = ublas::norm_2(grid3_[x][y][z]-sample);
+                    if (min_distance > distance)
+                    {
+                        min_distance = distance;
+                        p.x = x;
+                        p.y = y;
+                        p.z = z;
+                    }
+                }
+        return p;
     }
 }; // end of map class definition
 
