@@ -12,11 +12,11 @@ int main (void)
     som::map<N,S> map(2000, N/2, 0.8, 1.0, 0.01);
     map.init();
     map.load_samples(som::util::load_samples_from_file("samples.txt"));
-    map.save_image("map0.png");
+    som::util::save_to_image(map,"map0.png");
     timer.restart();
     map.learn();
     std::cout << "t1: " << timer.elapsed() << std::endl;
-    map.save_image("map1.png");
+    som::util::save_to_image(map,"map1.png");
 
     return EXIT_SUCCESS;
 }

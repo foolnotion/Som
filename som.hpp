@@ -59,6 +59,9 @@ int_range(int begin, int end)
 }
 } // namespace random
 
+template <int N, int S>
+class map;
+
 /** \brief Helper functions (read from file, etc) */
 namespace util { namespace {
 /*! \brief Split a space-separated string into tokens.
@@ -114,6 +117,43 @@ load_samples_from_file(const char* filename)
     }
     return samples;
 }
+
+/** \brief Attempts to map 3d (rgb) or 4d (rgba) points (when the sample vectors are of length 3 or 4) to a 2d plane
+
+    Uses boost::gil to create a png file, however, loosing one or 2 dimensions makes the image look weird. But it's an
+    interesting pattern nevertheless and it can show that the map really learned something.
+
+    \param filename Filename to be written to disk
+  */
+template <int N, int S>
+void
+save_to_image(const som::map<N,S>& map, const std::string& filename)
+{
+    typedef typename boost::multi_array<ublas::c_vector<double,S>, 3>::index index;
+
+    const int dim = ceil(sqrt(pow(N,3)));
+    const int dim2 = dim * dim;
+    boost::uint8_t r[dim2];
+    boost::uint8_t g[dim2];
+    boost::uint8_t b[dim2];
+    boost::uint8_t a[dim2];
+    boost::uint64_t x = 0;
+    for (index i = 0; i != N; ++i)
+        for (index j = 0; j != N; ++j)
+            for (index k = 0; k != N; ++k)
+            {
+                ublas::c_vector<double,S> v = map.element(i,j,k) * 255;
+                r[x] = v[0];
+                g[x] = v[1];
+                b[x] = v[2];
+                a[x] = v[3];
+                ++x;
+            }
+//        boost::gil::rgba8c_planar_view_t view = boost::gil::planar_rgba_view(dim, dim, r, g, b, a, dim);
+    boost::gil::rgb8c_planar_view_t view = boost::gil::planar_rgb_view(dim, dim, r, g, b, dim);
+    boost::gil::png_write_view(filename, view);
+}
+
 } // namespace util
 
 /** \brief 3d point data type */
@@ -316,39 +356,6 @@ public:
             samples_[i] /= ublas::norm_2(samples_[i]); // normalization
             std::cout << "\t" << samples_[i] << std::endl;
         }
-    }
-
-    /** \brief Attempts to map 3d (rgb) or 4d (rgba) points (when the sample vectors are of length 3 or 4) to a 2d plane
-
-        Uses boost::gil to create a png file, however, loosing one or 2 dimensions makes the image look weird. But it's an
-        interesting pattern nevertheless and it can show that the map really learned something.
-
-        \param filename Filename to be written to disk
-      */
-    void
-    save_image(const std::string& filename) const
-    {
-        const int dim = ceil(sqrt(pow(N,3)));
-        const int dim2 = dim * dim;
-        boost::uint8_t r[dim2];
-        boost::uint8_t g[dim2];
-        boost::uint8_t b[dim2];
-        boost::uint8_t a[dim2];
-        boost::uint64_t x = 0;
-        for (index i = 0; i != N; ++i)
-            for (index j = 0; j != N; ++j)
-                for (index k = 0; k != N; ++k)
-                {
-                    ublas::c_vector<double,S> v = grid3_[i][j][k] * 255;
-                    r[x] = v[0];
-                    g[x] = v[1];
-                    b[x] = v[2];
-                    a[x] = v[3];
-                    ++x;
-                }
-//        boost::gil::rgba8c_planar_view_t view = boost::gil::planar_rgba_view(dim, dim, r, g, b, a, dim);
-        boost::gil::rgb8c_planar_view_t view = boost::gil::planar_rgb_view(dim, dim, r, g, b, dim);
-        boost::gil::png_write_view(filename, view);
     }
 
     void
