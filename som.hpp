@@ -301,7 +301,7 @@ learning rate at step }\bf k & (1) \cr
            The learning rate for model vectors within the \f$BMU\f$ neighbourhood (given by (2)) is scaled by a factor corresponding to a 3d Gaussian envelope with a standard deviation of \f$R(k)/3\f$:
            \f[ \eqalignno
                 { {MV}_k[x,y,z] &= {MV}_{k-1}[z,y,z]+({AV}_k-{MV}_{k-1}[z,y,z]) \cdot L(k) \cdot
-                  e^{ - \frac{1}{2} \cdot \left( \frac{\| BMU-{MV}_k \|}{R(k)/3} \right)^2 } & (3) }
+                  \exp{ \left( - \frac{1}{2} \cdot \left( \frac{\| BMU-{MV}_k \|}{R(k)/3} \right)^2 \right) } & (3) }
            \f]
            Where \f$ \|BMU-{MV}_k\| = \sqrt {(x_{BMU}-x)^2+(y_{BMU}-y)^2+(z_{BMU}-z)^2} \f$ is the euclidean distance between the best matching unit and the current model vector within the neighbourhood.
   */
