@@ -16,11 +16,15 @@
 
 /* vector operations */
 #include <boost/numeric/ublas/vector.hpp>
+#include <boost/numeric/ublas/matrix.hpp>
+#include <boost/numeric/ublas/storage.hpp>
 #include <boost/numeric/ublas/io.hpp>
 
 /* array and multi_array storage types */
-#include <boost/array.hpp>
 #include <boost/multi_array.hpp>
+
+/*  threadpool */
+#include <boost/threadpool.hpp>
 
 /* random numbers */
 #include <boost/random/mersenne_twister.hpp>
@@ -30,6 +34,7 @@
 /* misc: save images, show progress */
 #include <boost/progress.hpp>
 #include <boost/gil/extension/io/png_io.hpp>
+#include <boost/lexical_cast.hpp>
 
 using namespace boost::numeric;
 
@@ -47,7 +52,7 @@ double
 double_range(double begin, double end)
 {
     boost::uniform_real<> dist(begin, end);
-    return dist(twister);
+    return dist(::twister);
 }
 
 /** \brief Returns an integer value \f$v\in[begin,end]\f$ (again, \e closed interval). */
@@ -55,7 +60,7 @@ int
 int_range(int begin, int end)
 {
     boost::uniform_int<> dist(begin, end);
-    return dist(twister);
+    return dist(::twister);
 }
 } // namespace random
 
@@ -93,7 +98,7 @@ typedef std::vector<std::vector<double> > samples;
 
 /** \brief Reads sample vectors line by line from a given filename
 
-    \todo Maybe replace split_by_spaces with \c boost::tokenizer something
+    \todo Maybe replace helper function \c split_by_spaces with \c boost::tokenizer something
 */
 std::vector<std::vector<double> >
 load_samples_from_file(const char* filename)
@@ -122,7 +127,9 @@ load_samples_from_file(const char* filename)
     return samples;
 }
 
-/** \brief Attempts to map 3d (rgb) or 4d (rgba) points (when the sample vectors are of length 3 or 4) to a 2d plane
+/** \brief Attempts to map 3d points (rgb or rgba) to a 2d plane
+
+    This function uses the <a href="http://en.wikipedia.org/wiki/Isometric_projection">isometric projection</a> to     draw the 3d lattice onto the planar surface.
 
     Uses \c boost::gil to create a png file. Even though loosing one or 2 dimensions makes the image look weird, an interesting pattern develops which can show that the map becomes organized.
 
@@ -135,29 +142,75 @@ save_to_image(const som::map<N,S>& map, const std::string& filename)
 {
     typedef typename boost::multi_array<ublas::c_vector<double,S>, 3>::index index;
 
-    const int dim = ceil(sqrt(pow(N,3)));
-    const int dim2 = dim * dim;
-    boost::uint8_t r[dim2];
-    boost::uint8_t g[dim2];
-    boost::uint8_t b[dim2];
-    boost::uint8_t a[dim2];
-    boost::uint64_t x = 0;
+    /* rotation angles for the isometric projection */
+    double alpha = 0.615472907; // 35.264° = arcsin(tan(30°))
+    double beta = 0.785398163; // 45°
+    /*rotation matrixes */
+    double r1_[3][3] = { {1,0,0}, {0,cos(alpha),sin(alpha)}, {0,-sin(alpha),cos(alpha)} };
+    double r2_[3][3] = { {cos(beta),0,-sin(beta)}, {0,1,0}, {sin(beta), 0, cos(beta)} };
+
+    ublas::matrix<double> r1(3,3), r2(3,3);
+    for (unsigned i = 0; i != r1.size1(); ++i)
+        for (unsigned j = 0; j != r1.size2(); ++j)
+        {
+            r1(i,j) = r1_[i][j];
+            r2(i,j) = r2_[i][j];
+        }
+
+    /* image dimensions */
+    const unsigned width = N * 10;
+    const unsigned height = N * 5;
+
+    /* color channels - dynamically allocated to be able to create large images */
+    boost::shared_array<boost::uint8_t> r(new boost::uint8_t[width*height]);
+    boost::shared_array<boost::uint8_t> g(new boost::uint8_t[width*height]);
+    boost::shared_array<boost::uint8_t> b(new boost::uint8_t[width*height]);
+    boost::shared_array<boost::uint8_t> a(new boost::uint8_t[width*height]);
+
+    /* offsets */
+//    double ox = width/2;
+    double ox = 20;
+    double oy = 20;
+
+    /* black background, alpha set to 78% */
+    for (unsigned i = 0; i != width*height; ++i)
+    {
+        r[i] = g[i] = b[i] = 0;
+        a[i] = 200;
+    }
+
+    boost::gil::rgb8_planar_view_t view = boost::gil::planar_rgb_view(width, height, r.get(), g.get(), b.get(), width);
+//    boost::gil::rgba8_planar_view_t view = boost::gil::planar_rgba_view(width, height, r, g, b, a, width);
+//
+
+    unsigned offset = 0;
+
     for (index i = 0; i != N; ++i)
         for (index j = 0; j != N; ++j)
             for (index k = 0; k != N; ++k)
             {
-                ublas::c_vector<double,S> v = map.element(i,j,k) * 255;
-                r[x] = v[0];
-                g[x] = v[1];
-                b[x] = v[2];
-                a[x] = v[3];
-                ++x;
-            }
-//        boost::gil::rgba8c_planar_view_t view = boost::gil::planar_rgba_view(dim, dim, r, g, b, a, dim);
-    boost::gil::rgb8c_planar_view_t view = boost::gil::planar_rgb_view(dim, dim, r, g, b, dim);
-    boost::gil::png_write_view(filename, view);
-}
+                if (j == N-1 && k == N-1 && i % 20 == 0 && i > 0)
+                    ox += 140;
+                unsigned v_[] = {i,j,k};
 
+                ublas::c_vector<unsigned,3> v;
+                std::copy(v_, v_+3, v.begin());
+
+                ublas::c_vector<int,3> c = ublas::prod(ublas::prod(r1,r2), v);
+
+                ublas::c_vector<double,S> m_vector = map.element(i,j,k) * 255; // model vector
+
+                c[0] += ox + offset;
+                c[1] += oy;
+
+                /* set the projected pixel */
+                if (c[0] < width && c[1] < height && c[0] >= 0 && c[1] >= 0)
+                    *view.at(c[0],c[1]) = boost::gil::rgb8_pixel_t(m_vector[0], m_vector[1], m_vector[2]);
+            }
+
+    boost::gil::png_write_view(filename, view);
+    std::cout << "offset: " << offset << std::endl;
+}
 } // namespace util
 
 /** \brief 3d point data type */
@@ -175,6 +228,47 @@ public:
     T x; //! X coordinate
     T y; //! Y coordinate
     T z; //! Z coordinate
+};
+
+template <int S>
+class runnable
+{
+private:
+    ublas::c_vector<double,S> sample_;
+    int learn_radius_;
+    double learn_rate_;
+    som::vector3<int> bmu_;
+
+public:
+    runnable(int learn_radius, double learn_rate, som::vector3<int>& bmu)
+        : learn_radius_(learn_radius),
+          learn_rate_(learn_rate),
+          bmu_(bmu)
+    {}
+
+    void
+    run(boost::multi_array_ref<ublas::c_vector<double,S>, 3> grid3, ublas::c_vector<double,S>& sample,
+        int xmin, int xmax, int ymin, int ymax, int zmin, int zmax)
+    {
+
+        double radius2 = learn_radius_ * learn_radius_;
+        /* double sigma = learn_radius_ / 3.0 therefore sigma2 = radius2 / 9.0 */
+        double sigma2 = radius2 / 9.0;
+
+        for (int i = xmin; i != xmax; ++i)
+            for (int j = ymin; j != ymax; ++j)
+                for (int k = zmin; k != zmax; ++k)
+                {
+                    int x = (i-bmu_.x), y = (j-bmu_.y), z = (k-bmu_.z);
+                    double dist2 = x*x + y*y + z*z;
+
+                    if (dist2 < radius2)
+                    {
+                        double radius_func = learn_rate_ * exp(-dist2 / (2*sigma2));
+                        grid3[i][j][k] += (sample - grid3[i][j][k]) * radius_func;
+                    }
+                }
+    }
 };
 
 /** \brief The self-organizing map
@@ -227,6 +321,9 @@ class map
     }
 
     typedef typename boost::multi_array<ublas::c_vector<double,S>, 3>::index index;
+    typedef typename boost::multi_array<ublas::c_vector<double,S>, 3>::iterator iterator3;
+    typedef typename boost::multi_array<ublas::c_vector<double,S>, 3>::template subarray<2>::type::iterator iterator2;
+    typedef typename boost::multi_array<ublas::c_vector<double,S>, 3>::template subarray<1>::type::iterator iterator1;
 
 private:
     boost::multi_array<ublas::c_vector<double,S>, 3> grid3_; //!< 3d grid of nodes
@@ -247,6 +344,9 @@ private:
     double learn_rate_decay_factor_;
 
     bool is_initialized_;
+
+    /* thread pool */
+    boost::threadpool::pool thread_pool_;
 
 public:
     /** \brief Map constructor
@@ -279,22 +379,21 @@ public:
       */
     void init()
     {
+        thread_pool_.size_controller().resize(boost::thread::hardware_concurrency());
+
         radius_decay_factor_ = std::exp(-std::log(initial_learn_radius_ * 2)/(radius_gone_factor_ * total_steps_));
         learn_rate_decay_factor_ = std::exp(-std::log(initial_learn_rate_/final_learn_rate_)/total_steps_);
 
         grid3_.resize(boost::extents[N][N][N]);
 
-        std::cout << "Map dimensions: " << N << "x" << N << "x" << N << " (" << N*N*N << " elements)" << std::endl;
+        std::cout << "Map dimensions: " << N << "x" << N << "x" << N << " (" << powl(N,3) << " elements)" << std::endl;
 
-        for (index x = 0; x != N; ++x)
-            for (index y = 0; y != N; ++y)
-                for (index z = 0; z != N; ++z)
-                {
-                    for (int i = 0; i != S; ++i)
-                    {
-                        grid3_[x][y][z](i) = som::random::double_range(0.f,1.f);
-                    }
-                }
+        for ( iterator3 it3 = grid3_.begin(); it3 != grid3_.end(); ++it3 )
+            for ( iterator2 it2 = (*it3).begin(); it2 != (*it3).end(); ++it2 )
+                for (iterator1 it1 = (*it2).begin(); it1 != (*it2).end(); ++it1 )
+                    for (typename ublas::c_vector<double,S>::iterator it = (*it1).begin(); it != (*it1).end(); ++it)
+                        *it = som::random::double_range(0.f,1.f);
+
         is_initialized_ = true;
     }
 
@@ -325,14 +424,13 @@ public:
         }
 
         samples_.resize(samples.size());
-        for (typename std::vector<ublas::c_vector<double,S> >::size_type i = 0; i != samples_.size(); ++i)
+        for (typename std::vector<ublas::c_vector<double,S> >::size_type it1 = 0; it1 != samples_.size(); ++it1)
         {
-            for (typename ublas::c_vector<double,S>::size_type j = 0; j != samples[i].size(); ++j)
+            for (typename ublas::c_vector<double,S>::size_type it2 = 0; it2 != samples[it1].size(); ++it2)
             {
-                samples_[i](j) = samples[i][j];
+                samples_[it1](it2) = samples[it1][it2];
             }
-            samples_[i] /= ublas::norm_2(samples_[i]); // normalization
-            std::cout << "\t" << samples_[i] << std::endl;
+            samples_[it1] /= ublas::norm_2(samples_[it1]); // normalization
         }
     }
 
@@ -359,7 +457,24 @@ public:
             for (unsigned i = 0; i != samples_.size(); ++i)
             {
                 som::vector3<int> bmu = best_matching_unit(samples_[i]);
-                scale_neighbours(bmu, samples_[i]);
+
+                int xmin = (bmu.x > learn_radius_) ? (bmu.x - learn_radius_) : 0;
+                int xmax = ( (bmu.x + learn_radius_) < N) ? (bmu.x + learn_radius_) : N;
+
+                int ymin = (bmu.y > learn_radius_) ? (bmu.y - learn_radius_) : 0;
+                int ymax = ( (bmu.y + learn_radius_) < N) ? (bmu.y + learn_radius_) : N;
+
+                int zmin = (bmu.z > learn_radius_) ? (bmu.z - learn_radius_) : 0;
+                int zmax = ( (bmu.z + learn_radius_) < N) ? (bmu.z + learn_radius_) : N;
+
+                som::runnable<S> run_me_over(learn_radius_, learn_rate_, bmu);
+
+                boost::threadpool::schedule(thread_pool_,
+                                            boost::bind(&som::runnable<S>::run, &run_me_over,
+                                                        boost::ref(grid3_), boost::ref(samples_[i]),
+                                                        xmin, xmax, ymin, ymax, zmin, zmax));
+                thread_pool_.wait();
+                //                scale_neighbours(bmu, samples_[i]);
             }
             ++pt;
         }
@@ -410,21 +525,21 @@ private:
         \returns A som::point3 representing the coordinates of the closest node
      */
     inline som::vector3<int>
-    best_matching_unit(const ublas::c_vector<double,S>& sample) const
+    best_matching_unit(const ublas::c_vector<double,S>& sample)
     {
         som::vector3<int> p;
         double min_distance = 2.0; // trick: the euclidean norm for a unit vector will never be greater than sqrt(3)
-        for (index x = 0; x != N; ++x)
-            for (index y = 0; y != N; ++y)
-                for (index z = 0; z != N; ++z)
+        for (index i = 0; i != N; ++i)
+            for (index j = 0; j != N; ++j)
+                for (index k = 0; k != N; ++k)
                 {
-                    double distance = ublas::norm_2(grid3_[x][y][z]-sample);
+                    double distance = ublas::norm_2(grid3_[i][j][k] - sample);
                     if (min_distance > distance)
                     {
                         min_distance = distance;
-                        p.x = x;
-                        p.y = y;
-                        p.z = z;
+                        p.x = i;
+                        p.y = j;
+                        p.z = k;
                     }
                 }
         return p;
