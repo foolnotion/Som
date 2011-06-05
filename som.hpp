@@ -64,10 +64,11 @@ int_range(int begin, int end)
 }
 } // namespace random
 
+/* forward declaration of map */
 template <int N, int S>
 class map;
 
-/** \brief Helper functions (read from file, etc) */
+/** \brief Helper functions (read from file, save, etc) */
 namespace util { namespace {
 /*! \brief Split a space-separated string into tokens.
 
@@ -129,22 +130,50 @@ load_samples_from_file(const char* filename)
 
 /** \brief Attempts to map 3d points (rgb or rgba) to a 2d plane
 
-    This function uses the <a href="http://en.wikipedia.org/wiki/Isometric_projection">isometric projection</a> to     draw the 3d lattice onto the planar surface.
+    This function uses the <a href="http://en.wikipedia.org/wiki/Isometric_projection">isometric projection</a> to draw the 3d lattice onto the planar surface.
 
-    Uses \c boost::gil to create a png file. Even though loosing one or 2 dimensions makes the image look weird, an interesting pattern develops which can show that the map becomes organized.
+    Uses \c boost::gil to create a png file.
 
     \param map The self-organizing map
     \param filename Filename to be written to disk
+    \param slices Number of slices (cross sections of a given width along the x-axis) to divide the cube into (for easier representation). This parameter is optional.
   */
 template <int N, int S>
 void
-save_to_image(const som::map<N,S>& map, const std::string& filename)
+save_to_image(const som::map<N,S>& map, const std::string& filename, int slices=0)
 {
     typedef typename boost::multi_array<ublas::c_vector<double,S>, 3>::index index;
+
+    /* offsets/padding */
+    double ox = N;
+    double oy = 50;
+
+    /* image dimensions */
+    unsigned d = 0.75*N; // horizontal distance between slices
+    unsigned width;
+    if (slices > 0)
+        width = ox + slices * d + N/sqrt(2);
+    else
+        width = 2 * N;
+    unsigned height = 2 * (N + oy);
+
+    /* color channels - dynamically allocated to be able to create large images */
+    boost::shared_array<boost::uint8_t> r(new boost::uint8_t[width*height]);
+    boost::shared_array<boost::uint8_t> g(new boost::uint8_t[width*height]);
+    boost::shared_array<boost::uint8_t> b(new boost::uint8_t[width*height]);
+    boost::shared_array<boost::uint8_t> a(new boost::uint8_t[width*height]);
+
+    /* black background, alpha set to 78% */
+    for (unsigned i = 0; i != width*height; ++i)
+    {
+        r[i] = g[i] = b[i] = 0;
+        a[i] = 200;
+    }
 
     /* rotation angles for the isometric projection */
     double alpha = 0.615472907; // 35.264° = arcsin(tan(30°))
     double beta = 0.785398163; // 45°
+
     /*rotation matrixes */
     double r1_[3][3] = { {1,0,0}, {0,cos(alpha),sin(alpha)}, {0,-sin(alpha),cos(alpha)} };
     double r2_[3][3] = { {cos(beta),0,-sin(beta)}, {0,1,0}, {sin(beta), 0, cos(beta)} };
@@ -157,40 +186,18 @@ save_to_image(const som::map<N,S>& map, const std::string& filename)
             r2(i,j) = r2_[i][j];
         }
 
-    /* image dimensions */
-    const unsigned width = N * 10;
-    const unsigned height = N * 5;
-
-    /* color channels - dynamically allocated to be able to create large images */
-    boost::shared_array<boost::uint8_t> r(new boost::uint8_t[width*height]);
-    boost::shared_array<boost::uint8_t> g(new boost::uint8_t[width*height]);
-    boost::shared_array<boost::uint8_t> b(new boost::uint8_t[width*height]);
-    boost::shared_array<boost::uint8_t> a(new boost::uint8_t[width*height]);
-
-    /* offsets */
-//    double ox = width/2;
-    double ox = 20;
-    double oy = 20;
-
-    /* black background, alpha set to 78% */
-    for (unsigned i = 0; i != width*height; ++i)
-    {
-        r[i] = g[i] = b[i] = 0;
-        a[i] = 200;
-    }
-
     boost::gil::rgb8_planar_view_t view = boost::gil::planar_rgb_view(width, height, r.get(), g.get(), b.get(), width);
 //    boost::gil::rgba8_planar_view_t view = boost::gil::planar_rgba_view(width, height, r, g, b, a, width);
 //
-
-    unsigned offset = 0;
-
     for (index i = 0; i != N; ++i)
         for (index j = 0; j != N; ++j)
             for (index k = 0; k != N; ++k)
             {
-                if (j == N-1 && k == N-1 && i % 20 == 0 && i > 0)
-                    ox += 140;
+                if (slices > 0)
+                {
+                    if (j == N-1 && k == N-1 && i % (N/slices) == 0 && i > 0)
+                        ox += d;
+                }
                 unsigned v_[] = {i,j,k};
 
                 ublas::c_vector<unsigned,3> v;
@@ -200,16 +207,14 @@ save_to_image(const som::map<N,S>& map, const std::string& filename)
 
                 ublas::c_vector<double,S> m_vector = map.element(i,j,k) * 255; // model vector
 
-                c[0] += ox + offset;
+                c[0] += ox;
                 c[1] += oy;
 
                 /* set the projected pixel */
-                if (c[0] < width && c[1] < height && c[0] >= 0 && c[1] >= 0)
-                    *view.at(c[0],c[1]) = boost::gil::rgb8_pixel_t(m_vector[0], m_vector[1], m_vector[2]);
+                *view.at(c[0],c[1]) = boost::gil::rgb8_pixel_t(m_vector[0], m_vector[1], m_vector[2]);
             }
 
     boost::gil::png_write_view(filename, view);
-    std::cout << "offset: " << offset << std::endl;
 }
 } // namespace util
 
@@ -250,7 +255,6 @@ public:
     run(boost::multi_array_ref<ublas::c_vector<double,S>, 3> grid3, ublas::c_vector<double,S>& sample,
         int xmin, int xmax, int ymin, int ymax, int zmin, int zmax)
     {
-
         double radius2 = learn_radius_ * learn_radius_;
         /* double sigma = learn_radius_ / 3.0 therefore sigma2 = radius2 / 9.0 */
         double sigma2 = radius2 / 9.0;
@@ -439,6 +443,8 @@ public:
         Runs for a total number of epochs
         - at each epoch (discrete time step) the map scales the weight vectors of the \f$BMU\f$ and it's neighbours
 
+        \todo Find a way to share work among threads (although this is overcooking it for a simple SOM)
+
       */
     void
     learn()
@@ -451,6 +457,12 @@ public:
         boost::progress_display pt(total_steps_);
         for (step_ = 0; step_ != total_steps_; ++step_)
         {
+            if (step_ % 10 == 0)
+            {
+                std::string str = boost::lexical_cast<std::string>(step_/10);
+                som::util::save_to_image(*this, str + ".png", 10);
+            }
+
             learn_radius_ = round(initial_learn_radius_ * pow(radius_decay_factor_, step_));
             learn_rate_ = initial_learn_rate_ * pow(learn_rate_decay_factor_, step_);
 
@@ -458,23 +470,22 @@ public:
             {
                 som::vector3<int> bmu = best_matching_unit(samples_[i]);
 
-                int xmin = (bmu.x > learn_radius_) ? (bmu.x - learn_radius_) : 0;
-                int xmax = ( (bmu.x + learn_radius_) < N) ? (bmu.x + learn_radius_) : N;
+                    int xmin = (bmu.x > learn_radius_) ? (bmu.x - learn_radius_) : 0;
+                    int xmax = ( (bmu.x + learn_radius_) < N) ? (bmu.x + learn_radius_) : N;
 
-                int ymin = (bmu.y > learn_radius_) ? (bmu.y - learn_radius_) : 0;
-                int ymax = ( (bmu.y + learn_radius_) < N) ? (bmu.y + learn_radius_) : N;
+                    int ymin = (bmu.y > learn_radius_) ? (bmu.y - learn_radius_) : 0;
+                    int ymax = ( (bmu.y + learn_radius_) < N) ? (bmu.y + learn_radius_) : N;
 
-                int zmin = (bmu.z > learn_radius_) ? (bmu.z - learn_radius_) : 0;
-                int zmax = ( (bmu.z + learn_radius_) < N) ? (bmu.z + learn_radius_) : N;
+                    int zmin = (bmu.z > learn_radius_) ? (bmu.z - learn_radius_) : 0;
+                    int zmax = ( (bmu.z + learn_radius_) < N) ? (bmu.z + learn_radius_) : N;
 
-                som::runnable<S> run_me_over(learn_radius_, learn_rate_, bmu);
+                    som::runnable<S> run_me_over(learn_radius_, learn_rate_, bmu);
 
-                boost::threadpool::schedule(thread_pool_,
-                                            boost::bind(&som::runnable<S>::run, &run_me_over,
-                                                        boost::ref(grid3_), boost::ref(samples_[i]),
-                                                        xmin, xmax, ymin, ymax, zmin, zmax));
-                thread_pool_.wait();
-                //                scale_neighbours(bmu, samples_[i]);
+                    boost::threadpool::schedule(thread_pool_,
+                                                boost::bind(&som::runnable<S>::run, &run_me_over,
+                                                            boost::ref(grid3_), boost::ref(samples_[i]),
+                                                            xmin, xmax, ymin, ymax, zmin, zmax));
+                    thread_pool_.wait();
             }
             ++pt;
         }
@@ -482,6 +493,8 @@ public:
 
 private:
     /*! \brief Modify the best matching unit and its neighbours according to the current sample
+
+      \deprecated Will be completely replaced by instances of som::runnable
 
         \param bmu The best matching unit
       */
