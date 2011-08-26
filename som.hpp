@@ -38,7 +38,7 @@
 
 using namespace boost::numeric;
 
-/* Using a global generator (we don't want to create a new one at every call */
+/* Using a global generator (we don't want to create a new one at every call) */
 namespace { boost::mt19937 twister; } // anonymous namespace - no one shall get their filthy hands on the twister!
 
 namespace som {
@@ -174,7 +174,7 @@ save_to_image(const som::map<N,S>& map, const std::string& filename, int slices=
     double alpha = 0.615472907; // 35.264° = arcsin(tan(30°))
     double beta = 0.785398163; // 45°
 
-    /*rotation matrixes */
+    /* rotation matrixes */
     double r1_[3][3] = { {1,0,0}, {0,cos(alpha),sin(alpha)}, {0,-sin(alpha),cos(alpha)} };
     double r2_[3][3] = { {cos(beta),0,-sin(beta)}, {0,1,0}, {sin(beta), 0, cos(beta)} };
 
